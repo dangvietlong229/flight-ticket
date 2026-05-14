@@ -35,7 +35,7 @@ class Agent:
     def __init__(self):
         genai.configure(api_key=Config.gemini_api_key)
         self.model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
+            model_name="gemini-3.1-flash-lite",
             system_instruction=SYSTEM_PROMPT,
             tools=[search_flights, search_shopping],
         )
