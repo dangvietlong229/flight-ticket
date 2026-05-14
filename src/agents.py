@@ -25,7 +25,8 @@ NGUYÊN TẮC:
 - Có thể nói chuyện thông thường (chào hỏi, tạm biệt) — không cần gọi tool.
 
 Hôm nay là {TODAY.strftime("%A, %d/%m/%Y")} — ĐÂY LÀ MỐC THỜI GIAN HIỆN TẠI.
-Mặc định cho các câu hỏi mơ hồ về thời gian:
+- KHÔNG TỰ ĐỘNG THÊM ngày về (return_date) nếu user không yêu cầu khứ hồi hoặc không nói rõ ngày về. Nếu không có ngày về, bot sẽ tự hiểu là tìm vé một chiều.
+- Mặc định cho các câu hỏi mơ hồ về thời gian:
 - "cuối tuần" → thứ Sáu tuần gần nhất (không quá khứ)
 - "tuần sau" → tuần tiếp theo
 - Nếu không rõ, lấy ngày đi và ngày về hợp lý."""

@@ -37,7 +37,7 @@ def search_flights(
         departure_id: IATA code (e.g. SGN, HAN, DAD)
         arrival_id: IATA code of destination
         outbound_date: YYYY-MM-DD, defaults to next Friday
-        return_date: YYYY-MM-DD, defaults to outbound + 5 days
+        return_date: YYYY-MM-DD. DO NOT provide if user explicitly asks for one-way flight, or if they do not mention return.
         adults: number of passengers
         currency: VND, USD, etc.
 
@@ -46,20 +46,22 @@ def search_flights(
     """
     key = Config.serpapi_key
     outbound = outbound_date or _get_next_friday()
-    ret = return_date or (
-        date.fromisoformat(outbound) + timedelta(days=5)
-    ).isoformat()
 
     params: dict[str, Any] = {
         "engine": "google_flights",
         "departure_id": departure_id,
         "arrival_id": arrival_id,
         "outbound_date": outbound,
-        "return_date": ret,
         "adults": adults,
         "currency": currency,
         "api_key": key,
     }
+
+    if return_date:
+        params["return_date"] = return_date
+        params["type"] = "1"  # Round trip
+    else:
+        params["type"] = "2"  # One-way
 
     try:
         resp = httpx.get(SERPAPI_BASE, params=params, timeout=15)
@@ -68,13 +70,13 @@ def search_flights(
     except Exception as e:
         return f"⚠️ Lỗi search flight: {e}"
 
-    return _format_flights(data, departure_id, arrival_id, outbound, ret)
+    return _format_flights(data, departure_id, arrival_id, outbound, return_date)
 
 
 def _format_flights(
-    data: dict, dep: str, arr: str, out: str, ret: str
+    data: dict, dep: str, arr: str, out: str, ret: str | None
 ) -> str:
-    """Format flight results into compact, beautiful Telegram message."""
+    """Format flight results into structured, beautiful Telegram message."""
     best = data.get("best_flights", [])
     other = data.get("other_flights", [])
     all_flights = best + other
@@ -86,31 +88,31 @@ def _format_flights(
     city_map = {"SGN": "Sài Gòn", "HAN": "Hà Nội", "DAD": "Đà Nẵng",
                 "PQC": "Phú Quốc", "CXR": "Nha Trang", "HUI": "Huế",
                 "DIN": "Điện Biên", "VII": "Vinh", "UIH": "Quy Nhơn",
-                "TBB": "Tuy Hòa", "VCA": "Cần Thơ"}
+                "TBB": "Tuy Hòa", "VCA": "Cần Thơ", "DLI": "Đà Lạt",
+                "VDO": "Vân Đồn", "VKG": "Rạch Giá", "VCS": "Côn Đảo"}
     dep_name = city_map.get(dep, dep)
     arr_name = city_map.get(arr, arr)
 
-    # Emoji for header
-    lines = [f"✈️ *{dep_name} → {arr_name}*"]
-    lines.append(f"📅 *{out}* → *{ret}* ({len(all_flights)} chuyến)")
-    lines.append("")
-
-    # Google Flights search link
-    gf_link = (
-        f"https://www.google.com/travel/flights?"
-        f"q=Flights+to+{arr}+from+{dep}+on+{out}+return+{ret}"
-    )
+    lines = [f"✈️ *{dep_name} ({dep}) → {arr_name} ({arr})*"]
+    
+    if ret:
+        lines.append(f"🛫 Loại vé: Khứ hồi | 📅 Ngày đi: {out} - Ngày về: {ret}")
+        gf_link = f"https://www.google.com/travel/flights?q=Flights+to+{arr}+from+{dep}+on+{out}+return+{ret}"
+    else:
+        lines.append(f"🛫 Loại vé: Một chiều | 📅 Ngày đi: {out}")
+        gf_link = f"https://www.google.com/travel/flights?q=Flights+to+{arr}+from+{dep}+on+{out}+oneway"
+    
+    lines.append("-" * 45)
 
     for i, flight in enumerate(all_flights[:5], 1):
         price = flight.get('price', 0)
-        price_fmt = f"{price:,}đ" if price < 1000000 else f"{price/1000:,.0f}K"
+        price_fmt = f"{price:,} VND"
 
         legs = flight.get("flights", [])
         total_min = flight.get("total_duration", 0)
         h, m = divmod(total_min, 60)
-        duration = f"{h}h{m}" if h else f"{m}ph"
+        duration = f"{h}h{m}m" if h else f"{m}m"
 
-        # Build compact per-flight block
         stops = []
         segments = []
         for leg in legs:
@@ -120,27 +122,36 @@ def _format_flights(
             dep_code = leg.get("departure_airport", {}).get("id", "")
             arr_code = leg.get("arrival_airport", {}).get("id", "")
             flight_no = leg.get("flight_number", "")
-            segments.append(f"{dep_t}→{arr_t}")
+            segments.append(f"{dep_t} ({dep_code}) → {arr_t} ({arr_code})")
             stops.append(f"{airline} {flight_no}")
 
         layovers = flight.get("layovers", [])
-        layover_names = [l.get("name", str(l)) if isinstance(l, dict) else str(l) for l in layovers]
-        stop_text = f" · ⏳ {', '.join(layover_names)}" if layover_names else " · *Thẳng*"
+        if not layovers:
+            transit_info = "Bay thẳng"
+        else:
+            layover_texts = []
+            for l in layovers:
+                if isinstance(l, dict):
+                    name = l.get("name", str(l))
+                    dur = l.get("duration", 0)
+                    lh, lm = divmod(dur, 60)
+                    dur_str = f"{lh}h{lm}m" if lh else f"{lm}m"
+                    layover_texts.append(f"{dur_str} tại {name}")
+                else:
+                    layover_texts.append(str(l))
+            transit_info = f"{len(layovers)} điểm dừng: {', '.join(layover_texts)}"
 
-        # Price rank emoji
-        rank_emoji = ["🏆", "🥈", "🥉", "4️⃣", "5️⃣"][min(i - 1, 4)]
-
-        # One-line status: airline + flight_no
+        rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][min(i - 1, 4)]
         airline_line = " → ".join(stops)
+        segments_line = " | ".join(segments)
 
-        lines.append(
-            f"{rank_emoji} *{price_fmt}* {' → '.join(segments)} ({duration})"
-        )
-        lines.append(f"   `{airline_line}`{stop_text}")
-        lines.append("")
+        lines.append(f"{rank_emoji} *[{i}] {price_fmt}*")
+        lines.append(f"🕒 {segments_line}")
+        lines.append(f"⏳ Tổng thời gian: {duration} ({transit_info})")
+        lines.append(f"🏢 Hãng bay: {airline_line}")
+        lines.append("-" * 45)
 
-    # Footer: Google Flights link + note
-    lines.append(f"[🔍 Xem thêm trên Google Flights]({gf_link})")
+    lines.append(f"[🔍 Xem chi tiết và đặt vé trên Google Flights]({gf_link})")
 
     return "\n".join(lines)
 
