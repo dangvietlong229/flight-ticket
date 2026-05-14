@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tara-bot
+    env: python
+    buildCommand: pip install -r requirements.txt || pip install .
+    startCommand: python -m src.bot
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: ALLOWED_USER_ID
+        sync: false
