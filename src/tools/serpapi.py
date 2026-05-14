@@ -40,7 +40,9 @@ def _search_oneway(departure_id: str, arrival_id: str, date_str: str, adults: in
         resp = httpx.get(SERPAPI_BASE, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("best_flights", []) + data.get("other_flights", [])
+        all_flights = data.get("best_flights", []) + data.get("other_flights", [])
+        # Filter out flights with missing or zero price
+        return [f for f in all_flights if f.get("price", 0) > 0]
     except Exception as e:
         return []
 
